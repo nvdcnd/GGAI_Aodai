@@ -1,0 +1,59 @@
+{
+  "version": "1.0.0",
+  "styles": [
+    {
+      "id": "ngu_than_lap_co",
+      "name_keywords": ["ngũ thân", "lập cổ", "truyền thống", "ngu than"],
+      "display_name": "Áo Dài Ngũ Thân Lập Cổ (Truyền thống Huế)",
+      "historical_context": "Dòng áo dài cổ điển thời Nguyễn với 5 thân áo tượng trưng cho ngũ thường (Nhân, Lễ, Nghĩa, Trí, Tín) và 5 hũm khuy cài nghiêng bên phải.",
+      "prompt_enrichment": "Authentic Vietnamese traditional Nguy Than Lap Co 5-panel tunic, high standing rigid collar (lập cổ), 5 side-fastening buttons on the right chest, relaxed straight silhouette, wide sleeves, layered hem reaching below calves.",
+      "recommended_fabrics": ["Silk", "Satin", "Brocade (Gấm)"],
+      "recommended_accessories": ["Mấn đội đầu đồng màu", "Quạt xếp giấy xuyến chỉ", "Chuỗi hạt ngọc trai"]
+    },
+    {
+      "id": "giao_linh",
+      "name_keywords": ["giao lĩnh", "giao cổ", "đối khâm", "giao linh"],
+      "display_name": "Áo Giao Lĩnh (Tiền thân Áo Dài cổ)",
+      "historical_context": "Trang phục giao cổ vạt chéo thời Lê - Nguyễn, mang đậm đường nét cổ phong Việt Nam.",
+      "prompt_enrichment": "Ancient Vietnamese Giao Linh crossed-collar tunic, overlapping front panels forming a V-neck, flowing wide sleeves, elegant cinched waist with a silk sash belt, historical aristocratic drape.",
+      "recommended_fabrics": ["Raw silk", "Linen silk", "Organza"],
+      "recommended_accessories": ["Quạt xếp", "Trâm cài tóc mạ vàng", "Guốc gỗ truyền thống"]
+    },
+    {
+      "id": "le_pho",
+      "name_keywords": ["lê phổ", "cổ điển", "thập niên 30", "le pho"],
+      "display_name": "Áo Dài Tân Thời Lê Phổ (Thập niên 1930)",
+      "historical_context": "Thiết kế ôm sát cơ thể do họa sĩ Lê Phổ sáng tạo, tôn vinh đường cong quyến rũ của phụ nữ Việt Nam hiện đại.",
+      "prompt_enrichment": "Classic 1930s Le Pho style modern fit Ao Dai, high fitted collar, tailored waist hugging body curves naturally, long flowing front and back side-slit tunics extending near floor level, elegant high heels silhouette.",
+      "recommended_fabrics": ["Ha Dong Silk", "Chiffon", "Velvet (Nhung)"],
+      "recommended_accessories": ["Bóp đầm cầm tay", "Vòng tay cẩm thạch", "Khuyên tai ngọc trai"]
+    },
+    {
+      "id": "raglan",
+      "name_keywords": ["raglan", "rắc lăng", "thập niên 60", "sài gòn"],
+      "display_name": "Áo Dài Raglan Sài Gòn (Thập niên 1960)",
+      "historical_context": "Thiết kế tay raglan giảm nếp nhăn ở nách áo, giúp vạt áo phẳng mượt, phổ biến tại Sài Gòn thập niên 60-70.",
+      "prompt_enrichment": "1960s Saigon Raglan-sleeve Ao Dai, diagonal shoulder seam eliminating armpit wrinkles, smooth flat chest panel, moderate standing collar, fluid light fabric movement.",
+      "recommended_fabrics": ["Voile silk", "Printed silk", "Satin"],
+      "recommended_accessories": ["Kính mát dáng mắt mèo Vintage", "Túi xách da nhỏ", "Băng đô cài tóc"]
+    },
+    {
+      "id": "hoang_gia_gam",
+      "name_keywords": ["cưới", "gấm", "hoàng gia", "thêu phụng", "thêu rồng"],
+      "display_name": "Áo Dài Cưới / Hoàng Gia Gấm Thêu High-Fashion",
+      "historical_context": "Dòng áo dài cao cấp dùng cho lễ cưới, đại lễ với hoa văn thêu tay tỉ mỉ bằng chỉ tơ vàng hoặc kim tuyến.",
+      "prompt_enrichment": "Opulent Vietnamese Royal Wedding Ao Dai made of heavy brocade silk, intricate hand-embroidered metallic gold dragon and phoenix motifs, majestic high structured collar, matching embellished royal headpiece (Mấn).",
+      "recommended_fabrics": ["Royal Brocade", "Embroidered Velvet"],
+      "recommended_accessories": ["Mấn đội đầu đính ngọc", "Trang sức vàng chạm xá"]
+    },
+    {
+      "id": "cach_tan",
+      "name_keywords": ["cách tân", "tay phồng", "cổ tròn", "ngắn", "cach tan"],
+      "display_name": "Áo Dài Cách Tân Modern",
+      "historical_context": "Thiết kế áo dài hiện đại, rút ngắn vạt áo và thay đổi chi tiết cổ/tay để tiện lợi trong sinh hoạt thường nhật.",
+      "prompt_enrichment": "Modern fashion-forward Vietnamese Ao Dai, cropped tunic hem around knee length, modified neckline, stylish puffy sleeves, contemporary aesthetic paired with wide-leg culottes or silk trousers.",
+      "recommended_fabrics": ["Tulle silk", "Linen blend", "Organza"],
+      "recommended_accessories": ["Túi cói cầm tay", "Giày mules", "Mấn cách tân nhỏ"]
+    }
+  ]
+}
