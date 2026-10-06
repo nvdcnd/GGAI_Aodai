@@ -3,32 +3,29 @@ import base64
 import json
 import logging
 import os
+import random
+import re
+import unicodedata
+import urllib.parse
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import httpx
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from google import genai
-from google.genai import types
 from pydantic import BaseModel, Field
 
-# Logger configuration
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-)
+# Load biến môi trường từ file .env ngay khi app khởi chạy
+load_dotenv()
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("aodai_api")
 
-app = FastAPI(
-    title="Ao Dai Custom Image Generator API",
-    version="1.0.0",
-    description="API sinh ảnh Áo Dài chuẩn Hasselblad Photorealism với tri thức di sản và Fallback Provider"
-)
+app = FastAPI(title="Ao Dai Custom Image Generator API", version="1.7.0")
 
-# Enable CORS for Frontend/Client integrations
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -37,11 +34,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# API Keys
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-
 # Load Knowledge Base
 KNOWLEDGE_FILE = Path(__file__).parent / "aodai_knowledge.json"
 aodai_knowledge_db: List[Dict] = []
@@ -49,196 +41,225 @@ aodai_knowledge_db: List[Dict] = []
 if KNOWLEDGE_FILE.exists():
     try:
         with open(KNOWLEDGE_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            aodai_knowledge_db = data.get("styles", [])
+            aodai_knowledge_db = json.load(f).get("styles", [])
         logger.info(f"Loaded {len(aodai_knowledge_db)} Ao Dai styles into knowledge base.")
     except Exception as err:
         logger.error(f"Failed to load aodai_knowledge.json: {err}")
 
 
-# --- 1. SCHEMAS ---
 class GenderEnum(str, Enum):
     MALE = "Nam"
     FEMALE = "Nữ"
 
 
 class AoDaiGenerateInput(BaseModel):
-    gender: GenderEnum = Field(..., description="Giới tính người mặc", example="Nữ")
-    #body_type: str = Field(..., description="Thể chất / Dáng người", example="Cao rỏng, thon gọn, vai suôn")
-    occasion: str = Field(..., description="Mục đích mặc", example="Lễ cưới truyền thống")
-    ao_dai_style: str = Field(..., description="Kiểu áo dài", example="Áo dài ngũ thân truyền thống")
-    design_style: str = Field(..., description="Phong cách thiết kế", example="Tối giản, thêu hoa văn chim phụng chỉ tơ vàng")
-    shirt_color: str = Field(..., description="Màu áo", example="Đỏ nhung trầm")
-    pants_color: str = Field(..., description="Màu quần", example="Vàng hoàng kim")
-    accessories: List[str] = Field(default_factory=list, description="Danh sách phụ kiện", example=["Mấn đội đầu đồng màu", "Quạt xuyến chỉ"])
+    gender: GenderEnum
+    body_type: str
+    occasion: str
+    ao_dai_style: str
+    design_style: str
+    shirt_color: str
+    pants_color: str
+    accessories: List[str] = Field(default_factory=list)
 
 
 class AoDaiGenerateOutput(BaseModel):
-    success: bool = Field(..., description="Trạng thái thực thi thành công hay thất bại")
-    message: str = Field(..., description="Thông báo kết quả")
-    image_base64: Optional[str] = Field(None, description="Dữ liệu ảnh dạng Base64 data URI")
-    provider_used: Optional[str] = Field(None, description="API provider thực tế đã sinh ảnh (Gemini/DeepSeek)")
-    prompt_used: Optional[str] = Field(None, description="Prompt tiếng Anh chuẩn hóa được gửi tới AI Model")
-    matched_style_knowledge: Optional[str] = Field(None, description="Tên thể loại áo dài được trích xuất từ Knowledge Base")
-    error_details: Optional[str] = Field(None, description="Chi tiết lỗi nếu success=False")
+    success: bool
+    message: str
+    image_base64: Optional[str] = None
+    provider_used: Optional[str] = None
+    prompt_used: Optional[str] = None
+    matched_style_knowledge: Optional[str] = None
+    error_details: Optional[str] = None
 
 
-# --- 2. KNOWLEDGE BASE MATCHING & PROMPT BUILDER ---
-def match_style_enrichment(input_style: str) -> Tuple[str, str]:
-    """Matches user input style with knowledge base keywords to get prompt extensions."""
+# --- UTILS: TỰ ĐỘNG CHUYỂN TIẾNG VIỆT SANG TIẾNG ANH CHUẨN ASCII ---
+COLOR_MAP = {
+    "xanh lam đậm": "dark blue",
+    "xanh lam": "blue",
+    "đỏ nhung": "deep velvet red",
+    "đỏ": "red",
+    "vàng hoàng kim": "golden yellow",
+    "vàng": "yellow",
+    "trắng lụa": "white silk",
+    "trắng": "white",
+    "đen": "black",
+    "xanh lá": "green",
+    "hồng": "pink",
+    "tím": "purple"
+}
+
+
+def translate_or_strip_vietnamese(text: str) -> str:
+    """Chuyển đổi các từ tiếng Việt phổ biến hoặc khử dấu unicode thành ASCII hoàn toàn."""
+    text_lower = text.strip().lower()
+    if text_lower in COLOR_MAP:
+        return COLOR_MAP[text_lower]
+    
+    nfkd_form = unicodedata.normalize('NFKD', text)
+    only_ascii = "".join([c for c in nfkd_form if not unicodedata.combining(c)])
+    clean_str = re.sub(r'[^a-zA-Z0-9\s,-]', '', only_ascii)
+    return re.sub(r'\s+', ' ', clean_str).strip()
+
+
+def match_style_enrichment(input_style: str, gender: GenderEnum) -> Tuple[str, str]:
     input_lower = input_style.lower()
+    for item in aodai_knowledge_db:
+        if gender == GenderEnum.MALE and "nam" in item["id"]:
+            for kw in item.get("name_keywords", []):
+                if kw in input_lower:
+                    return item["display_name"], item["prompt_enrichment"]
+        elif gender == GenderEnum.FEMALE and "nam" not in item["id"]:
+            for kw in item.get("name_keywords", []):
+                if kw in input_lower:
+                    return item["display_name"], item["prompt_enrichment"]
+
     for item in aodai_knowledge_db:
         for kw in item.get("name_keywords", []):
             if kw in input_lower:
                 return item["display_name"], item["prompt_enrichment"]
+
+    if gender == GenderEnum.MALE:
+        return "Áo Dài Nam Truyền Thống", "Authentic traditional Vietnamese male Ao Dai, long silk tunic extending past knees, smooth front chest, loose pants."
+    return "Áo Dài Nữ Truyền Thống", "Authentic traditional Vietnamese female Ao Dai, fitted tunic, long flowing panels over silk trousers."
+
+
+def build_clean_ascii_prompt(inp: AoDaiGenerateInput) -> Tuple[str, str]:
+    matched_title, style_enrichment = match_style_enrichment(inp.ao_dai_style, inp.gender)
     
-    # Generic fallback enrichment
-    return "Áo Dài Truyền Thống Việt Nam", "Classic Vietnamese Ao Dai silhouette, high standing collar, tailored fit, flowing elegant panels."
+    occasion_en = translate_or_strip_vietnamese(inp.occasion)
+    shirt_color_en = translate_or_strip_vietnamese(inp.shirt_color)
+    pants_color_en = translate_or_strip_vietnamese(inp.pants_color)
+    design_style_en = translate_or_strip_vietnamese(inp.design_style)
+    body_type_en = translate_or_strip_vietnamese(inp.body_type)
+    acc_clean = [translate_or_strip_vietnamese(a) for a in inp.accessories]
+    acc_str = ", ".join(acc_clean) if acc_clean else "none"
 
-
-def build_hasselblad_prompt(inp: AoDaiGenerateInput) -> Tuple[str, str]:
-    gender_str = "Vietnamese woman" if inp.gender == GenderEnum.FEMALE else "Vietnamese man"
-    acc_str = ", ".join(inp.accessories) if inp.accessories else "No extra accessories"
-    
-    matched_title, style_enrichment = match_style_enrichment(inp.ao_dai_style)
-
-    prompt = (
-        f"A full-length, front-facing commercial fashion portrait of a {gender_str} with a normal body build, "
-        f"standing gracefully centered in the frame facing the camera directly. The subject is wearing a high-end customized Ao Dai "
-        f"tailored specifically for {inp.occasion}.\n\n"
-        f"**Style & Heritage Nuance ({matched_title}):**\n"
-        f"- Archetype Features: {style_enrichment}\n"
-        f"- Custom Specific Style: {inp.ao_dai_style}\n"
-        f"- Design Theme & Embroidery: {inp.design_style}\n"
-        f"- Tunic/Shirt Color: {inp.shirt_color}\n"
-        f"- Trousers/Pants Color: {inp.pants_color}\n"
-        f"- Accessories: {acc_str}\n\n"
-        f"**Commercial Photography & Technical Specs:**\n"
-        f"- Shot on Hasselblad H6D-100c medium format camera with Hasselblad HC 100mm f/2.2 lens.\n"
-        f"- Pin-sharp focus on the subject, perfectly straight eye-level perspective, direct front view (chính diện), full body in frame.\n"
-        f"- Hyper-realistic fabric micro-textures showing fine silk sheen, authentic stitching detail, natural drape and folds.\n"
-        f"- Professional studio softbox lighting with subtle rim lights, clean neutral studio background.\n"
-        f"- True-to-life skin tones, 8K resolution, high dynamic range (HDR), rich color grading, photorealistic, zero distortion."
-    )
-    return prompt.strip(), matched_title
-
-
-# --- 3. PROVIDER INTEGRATIONS ---
-def _call_gemini_sync(prompt: str, api_key: str) -> str:
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY is not configured.")
-    
-    client = genai.Client(api_key=api_key)
-    response = client.models.generate_images(
-        model='imagen-3.0-generate-002',
-        prompt=prompt,
-        config=types.GenerateImagesConfig(
-            number_of_images=1,
-            output_mime_type="image/jpeg",
-            aspect_ratio="3:4",
-            person_generation="ALLOW_ADULT",
+    if inp.gender == GenderEnum.MALE:
+        prompt = (
+            f"Full-length studio photo of a Vietnamese man with {body_type_en} body, wearing authentic traditional Vietnamese male Ao Dai for {occasion_en}. "
+            f"Long {shirt_color_en} silk robe tunic extending past knees over loose {pants_color_en} silk trousers. "
+            f"{style_enrichment}. Design: {design_style_en}. Accessories: {acc_str}. "
+            f"No belt, no Chinese Tangzhuang, no frog buttons. Hyperrealistic 8k fashion photography."
         )
-    )
-    if not response.generated_images:
-        raise RuntimeError("Gemini Imagen API returned empty response.")
-        
-    img_bytes = response.generated_images[0].image.image_bytes
-    b64_str = base64.b64encode(img_bytes).decode("utf-8")
-    return f"data:image/jpeg;base64,{b64_str}"
+    else:
+        prompt = (
+            f"Full-length studio photo of a Vietnamese woman with {body_type_en} body, wearing authentic traditional Vietnamese female Ao Dai for {occasion_en}. "
+            f"Elegant {shirt_color_en} silk tunic with long flowing panels over wide-leg {pants_color_en} silk trousers. "
+            f"{style_enrichment}. Design: {design_style_en}. Accessories: {acc_str}. "
+            f"Hyperrealistic 8k fashion photography."
+        )
+
+    clean_prompt = prompt.replace("\n", " ").replace("/", " ")
+    clean_prompt = re.sub(r'\s+', ' ', clean_prompt).strip()
+    return clean_prompt, matched_title
 
 
-async def generate_via_gemini(prompt: str) -> str:
-    return await asyncio.to_thread(_call_gemini_sync, prompt, GEMINI_API_KEY)
+# --- PROVIDER 1 (PRIMARY): Hugging Face Inference API ---
+HF_MODELS = [
+    "black-forest-labs/FLUX.1-schnell",
+    "black-forest-labs/FLUX.1-dev",
+    "stabilityai/stable-diffusion-xl-base-1.0"
+]
+
+async def generate_via_huggingface(prompt: str) -> Tuple[str, str]:
+    hf_token = os.getenv("HF_TOKEN", "").strip()
+    if not hf_token:
+        raise ValueError("HF_TOKEN chưa được cấu hình.")
+
+    headers = {"Authorization": f"Bearer {hf_token}"}
+    last_err = ""
+
+    for model_name in HF_MODELS:
+        api_url = f"https://api-inference.huggingface.co/models/{model_name}"
+        try:
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                res = await client.post(api_url, headers=headers, json={"inputs": prompt})
+                if res.status_code == 200 and res.content and len(res.content) > 2000:
+                    b64_str = base64.b64encode(res.content).decode("utf-8")
+                    return f"data:image/jpeg;base64,{b64_str}", model_name
+                else:
+                    last_err = f"Model {model_name} HTTP {res.status_code}: {res.text[:100]}"
+        except Exception as e:
+            last_err = f"Model {model_name} Error: {str(e)}"
+            continue
+
+    raise RuntimeError(f"Hugging Face thất bại: {last_err}")
 
 
-async def generate_via_deepseek(prompt: str) -> str:
-    if not DEEPSEEK_API_KEY:
-        raise ValueError("DEEPSEEK_API_KEY is not configured.")
-
-    headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "prompt": prompt,
-        "size": "1024x1365",
-        "response_format": "b64_json"
-    }
+# --- PROVIDER 2 (FALLBACK): Pollinations.ai ---
+async def generate_via_pollinations(prompt: str) -> str:
+    encoded_prompt = urllib.parse.quote(prompt, safe='')
+    seed = random.randint(1000, 999999)
+    
+    url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=flux&width=1024&height=1365&seed={seed}&nologo=true"
 
     async with httpx.AsyncClient(timeout=45.0) as client:
-        res = await client.post(f"{DEEPSEEK_BASE_URL}/images/generations", json=payload, headers=headers)
+        res = await client.get(url)
         if res.status_code != 200:
-            raise RuntimeError(f"DeepSeek API Error HTTP {res.status_code}: {res.text}")
+            raise RuntimeError(f"Pollinations Error HTTP {res.status_code}: {res.text[:100]}")
 
-        data = res.json()
-        b64_val = data["data"][0]["b64_json"]
-        if b64_val.startswith("data:image"):
-            return b64_val
-        return f"data:image/jpeg;base64,{b64_val}"
+        if not res.content or len(res.content) < 2000:
+            raise RuntimeError("Pollinations trả về dữ liệu ảnh không hợp lệ.")
+
+        b64_str = base64.b64encode(res.content).decode("utf-8")
+        return f"data:image/jpeg;base64,{b64_str}"
 
 
-# --- 4. ENDPOINT ROUTE ---
 @app.post("/api/v1/generate-aodai", response_model=AoDaiGenerateOutput, status_code=200)
 async def generate_aodai_endpoint(inp: AoDaiGenerateInput):
-    prompt, matched_knowledge = build_hasselblad_prompt(inp)
-    logger.info(f"Incoming Request -> Gender: {inp.gender.value}, Style: {inp.ao_dai_style} (Matched: {matched_knowledge})")
-
+    prompt, matched_knowledge = build_clean_ascii_prompt(inp)
+    logger.info(f"Incoming Request -> Gender: {inp.gender.value}, Style: {inp.ao_dai_style}")
+    logger.info(f"Generated Clean ASCII Prompt:\n{prompt}")
     errors = []
 
-    # Primary Attempt: Gemini
+    # 1. PRIMARY: Hugging Face
     try:
-        b64_data = await generate_via_gemini(prompt)
-        logger.info("Image generated successfully via Gemini API.")
+        logger.info("Đang sinh ảnh qua Primary Provider: Hugging Face...")
+        b64_data, used_model = await generate_via_huggingface(prompt)
+        logger.info(f"Sinh ảnh thành công qua Hugging Face ({used_model}).")
         return AoDaiGenerateOutput(
             success=True,
-            message="Sinh ảnh thành công qua Gemini API",
+            message=f"Sinh ảnh thành công qua Hugging Face ({used_model})",
             image_base64=b64_data,
-            provider_used="Gemini",
+            provider_used=f"Hugging Face ({used_model})",
             prompt_used=prompt,
             matched_style_knowledge=matched_knowledge
         )
     except Exception as e:
-        err_msg = f"Gemini Provider Failed: {str(e)}"
+        err_msg = f"HuggingFace Error: {str(e)}"
         logger.warning(err_msg)
         errors.append(err_msg)
 
-    # Fallback Attempt: DeepSeek
+    # 2. FALLBACK: Pollinations.ai
     try:
-        logger.info("Initiating Rollback to Secondary Provider (DeepSeek)...")
-        b64_data = await generate_via_deepseek(prompt)
-        logger.info("Image generated successfully via DeepSeek API.")
+        logger.info("Rollback: Đang chuyển sang Secondary Provider (Pollinations.ai)...")
+        b64_data = await generate_via_pollinations(prompt)
+        logger.info("Sinh ảnh thành công qua Pollinations.ai.")
         return AoDaiGenerateOutput(
             success=True,
-            message="Sinh ảnh thành công qua DeepSeek API (Rollback)",
+            message="Sinh ảnh thành công qua Pollinations.ai (Rollback)",
             image_base64=b64_data,
-            provider_used="DeepSeek",
+            provider_used="Pollinations (Flux)",
             prompt_used=prompt,
             matched_style_knowledge=matched_knowledge
         )
     except Exception as e:
-        err_msg = f"DeepSeek Provider Failed: {str(e)}"
+        err_msg = f"Pollinations Error: {str(e)}"
         logger.error(err_msg)
         errors.append(err_msg)
 
-    # Both Failed -> Soft Failover (HTTP 200 with success=False)
-    logger.error("All providers failed to render image.")
+    # 3. Soft Failover Response
     return JSONResponse(
         status_code=200,
         content=AoDaiGenerateOutput(
             success=False,
-            message="Không thể sinh ảnh do cả 2 dịch vụ Gemini và DeepSeek đều gặp sự cố hoặc hết hạn ngạch.",
-            image_base64=None,
-            provider_used=None,
+            message="Không thể sinh ảnh do tất cả các provider đều gặp sự cố.",
             prompt_used=prompt,
             matched_style_knowledge=matched_knowledge,
             error_details=" | ".join(errors)
         ).model_dump()
     )
-
-
-@app.get("/health")
-async def health_check():
-    return {"status": "ok", "knowledge_styles_count": len(aodai_knowledge_db)}
 
 
 if __name__ == "__main__":
